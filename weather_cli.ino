@@ -1,25 +1,35 @@
 #include <Adafruit_ESP8266.h>
 #include <SoftwareSerial.h>
-#include <OneWire.h> // DS1820
-#include <Wire.h>
-#include <BMP180.h> // BMP
-
+//DHT
 #include "DHT.h"
+//BMP
+#include <Wire.h>
+#include <BMP180.h>
+//DS1820
+#include <OneWire.h>
+#include <DallasTemperature.h>
 
-#define ARD_RX_ESP_TX   10
-#define ARD_TX_ESP_RX   11
-#define ESP_RST         5
-SoftwareSerial esp(ARD_RX_ESP_TX, ARD_TX_ESP_RX); // Arduino RX = ESP TX, Arduino TX = ESP RX
+#define ARD_RX   10
+#define ARD_TX   11
+#define ESP_RST   5
+SoftwareSerial esp(ARD_RX, ARD_TX); // Arduino RX = ESP TX, Arduino TX = ESP RX
+//#define esp Serial1 // If using Leonardo board
 
-#define debug Serial
-//#define esp Serial1
+#define debug Serial // Ideally switch to external (SS debug UART), as now debug output contains lots of trash
+
 // Must declare output stream before Adafruit_ESP8266 constructor; can be
 // a Softwareserial stream, or debug/debug1/etc. for UART.
 Adafruit_ESP8266 wifi(&esp, &debug, ESP_RST);  // Must call begin() on the stream(s) before using Adafruit_ESP8266 object.
 
-DHT dht(3, DHT11); // DHT sensor on pin 2
-OneWire  ds(4);  // on pin 10 (a 4.7K resistor is necessary)
+
+// Sensor classes
+DHT dht(3, DHT11); // DHT sensor on pin 3
 BMP180 barometer;
+
+// Setup a oneWire instance to communicate with any OneWire devices (not just Maxim/Dallas temperature ICs)
+OneWire oneWire(4); //DS1820 sensor on pin 4
+DallasTemperature sensors(&oneWire);
+DeviceAddress ds; // arrays to hold device address
 
 #define ESP_SSID "Mystical Forcess" // Your network name here
 #define ESP_PASS "roomofmagic!" // Your network password here
@@ -36,12 +46,11 @@ void setup() {
 
   esp.begin(9600); // Soft debug connection to ESP8266
   debug.begin(9600);
-  //while (!debug); // UART debug
+  //while (!debug); // UART debug, Actual for Leonardo board
 
   debug.println(F("Adafruit ESP8266 Demo"));
   debug.println(F("Sensors init"));
-  dht.begin();
-  barInit();
+  initSensors();
 
   wifi.setBootMarker(F("ready"));
   wifi.setTimeouts(20000, 20000, 30000, 20000);
@@ -61,14 +70,14 @@ void setup() {
   }
   debug.println(F("OK."));
 
-//  debug.print(F("Checking firmware version..."));
-//  wifi.println(F("AT+GMR"));
-//  if (wifi.readLine(buffer, sizeof(buffer))) {
-//    debug.println(buffer);
-//    wifi.find(F("OK.")); // Discard the 'OK' that follows
-//  } else {
-//    debug.println(F("error"));
-//  }
+  debug.print(F("Checking firmware version..."));
+  wifi.println(F("AT+GMR"));
+  if (wifi.readLine(buffer, sizeof(buffer))) {
+    debug.println(buffer);
+    wifi.find(F("OK.")); // Discard the 'OK' that follows
+  } else {
+    debug.println(F("error"));
+  }
 
   debug.print(F("Connecting to WiFi..."));
   if (wifi.connectToAP(F(ESP_SSID), F(ESP_PASS))) {
@@ -77,7 +86,7 @@ void setup() {
     if (wifi.readLine(buffer, sizeof(buffer))) {
       debug.println(buffer);
       wifi.find(); // Discard the 'OK' that follows
-      doRequest();
+      doRequest(F(PAGE), prepareJson());
     } else { // IP addr check failed
       debug.println(F("error"));
     }
@@ -91,30 +100,35 @@ void loop() {
   unsigned long currentMillis = millis();
   if (currentMillis - previousMillis >= 120000L) {
     previousMillis = currentMillis;
-    doRequest();
+    String data = prepareJson();
+    debug.println(data);
+    doRequest(F(PAGE), data);
   }
 }
 
-void doRequest() {
+void doRequest(Fstr *url, String data) {
   debug.print(F("Connecting to host..."));
   if (wifi.connectTCP(F(HOST), PORT)) {
     debug.print(F("OK\nRequesting page..."));
-    if (wifi.postRequest(F(PAGE), prepareJson())) {
+    if (wifi.postRequest(url, data)) {
       debug.println("OK\nSearching for string...");
       // Search for a phrase in the open stream.
       // Must be a flash-resident string (F()).
-      if (wifi.find(F("created_at"), true)) {
+      if (wifi.find(F("201 Created"), true)) {
         debug.println(F("found!"));
+        clearBuffer();
       } else {
         debug.println(F("not found."));
       }
     } else { // URL request failed
       debug.println(F("error"));
     }
+    debug.print(F("Closing connection.."));
     wifi.closeTCP();
   } else { // TCP connect failed
     debug.println(F("D'oh!"));
   }
+  debug.println(F("EXIT"));
 }
 
 bool hardReset() {
@@ -152,7 +166,8 @@ String prepareJson() {
 }
 
 // Initating BMP sensor
-void barInit(void) {
+void initSensors(void) {
+  // BMP
   if (barometer.EnsureConnected()) { // We check to see if we can connect to the sensor.
     debug.println(F("Connected to BMP180")); // Output we are connected to the computer.
     barometer.SoftReset(); // When we have connected, we reset the device to ensure a clean start.
@@ -161,6 +176,14 @@ void barInit(void) {
   else {
     debug.println(F("Could not connect to BMP180"));
   }
+  // DHT
+  dht.begin();
+
+  // DS1820
+  sensors.begin();
+  if (!sensors.getAddress(ds, 0)) debug.println("Unable to find address for Device 0");
+  sensors.setResolution(ds, 9);
+  delay(250);
 }
 
 // Humidity from DHT
@@ -176,49 +199,17 @@ float getHumidity(void) {
 
 // Temp from DS1820
 float getTemperature(void) {
-  byte type_s;
-  byte data[12];
-  byte addr[8];
-  if ( !ds.search(addr)) {
-    ds.reset_search();
-    delay(250);
+  sensors.requestTemperatures(); // Send the command to get temperatures
+  float tempC = sensors.getTempC(ds);
+  return tempC;
+}
+
+// Cleaning up the esp buffer
+// useful when finding something in middle of the buffer.
+// preventing logging of remain buffer part
+void clearBuffer(void) {
+  while (esp.available() > 0) {
+    char t = esp.read();
+    delay(1);
   }
-  switch (addr[0]) {
-    case 0x10: // or old DS1820
-      type_s = 1;
-      break;
-    case 0x28:
-      type_s = 0;
-      break;
-    case 0x22:
-      type_s = 0;
-      break;
-    default:
-      debug.println(F("Device is not a DS18x20 family device."));
-  }
-  ds.reset();
-  ds.select(addr);
-  ds.write(0x44, 1);        // start conversion, with parasite power on at the end
-  delay(750);     // maybe 750ms is enough, maybe not
-  ds.reset();
-  ds.select(addr);
-  ds.write(0xBE);         // Read Scratchpad
-  for ( int i = 0; i < 9; i++) {           // we need 9 bytes
-    data[i] = ds.read();
-  }
-  int16_t raw = (data[1] << 8) | data[0];
-  if (type_s) {
-    raw = raw << 3; // 9 bit resolution default
-    if (data[7] == 0x10) {
-      raw = (raw & 0xFFF0) + 12 - data[6]; // "count remain" gives full 12 bit resolution
-    }
-  } else {
-    byte cfg = (data[4] & 0x60);
-    // at lower res, the low bits are undefined, so let's zero them
-    if (cfg == 0x00) raw = raw & ~7;  // 9 bit resolution, 93.75 ms
-    else if (cfg == 0x20) raw = raw & ~3; // 10 bit res, 187.5 ms
-    else if (cfg == 0x40) raw = raw & ~1; // 11 bit res, 375 ms
-    // default is 12 bit resolution, 750 ms conversion time
-  }
-  return (float)raw / 16.0;
 }
