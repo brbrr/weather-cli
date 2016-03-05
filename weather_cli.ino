@@ -1,20 +1,20 @@
 #include <Adafruit_ESP8266.h>
 #include <SoftwareSerial.h>
-#include <DHT.h> // DHT
 #include <OneWire.h> // DS1820
 #include <Wire.h>
 #include <BMP180.h> // BMP
+
+#include "DHT.h"
 
 #define ARD_RX_ESP_TX   10
 #define ARD_TX_ESP_RX   11
 #define ESP_RST         5
 SoftwareSerial esp(ARD_RX_ESP_TX, ARD_TX_ESP_RX); // Arduino RX = ESP TX, Arduino TX = ESP RX
-//SoftwareSerial debug(ARD_RX_ESP_TX, ARD_TX_ESP_RX); // Arduino RX = ESP TX, Arduino TX = ESP RX
 
 #define debug Serial
 //#define esp Serial1
 // Must declare output stream before Adafruit_ESP8266 constructor; can be
-// a Softwaredebug stream, or debug/debug1/etc. for UART.
+// a Softwareserial stream, or debug/debug1/etc. for UART.
 Adafruit_ESP8266 wifi(&esp, &debug, ESP_RST);  // Must call begin() on the stream(s) before using Adafruit_ESP8266 object.
 
 DHT dht(3, DHT11); // DHT sensor on pin 2
@@ -39,7 +39,8 @@ void setup() {
   //while (!debug); // UART debug
 
   debug.println(F("Adafruit ESP8266 Demo"));
-
+  debug.println(F("Sensors init"));
+  dht.begin();
   barInit();
 
   wifi.setBootMarker(F("ready"));
@@ -47,12 +48,10 @@ void setup() {
 
   // Test if module is ready
   debug.print(F("Hard reset..."));
-
   if (!hardReset()) {
     debug.println(F("no response from module."));
     for (;;);
   }
-
   debug.println(F("OK."));
 
   debug.print(F("Soft reset..."));
@@ -62,14 +61,14 @@ void setup() {
   }
   debug.println(F("OK."));
 
-  debug.print(F("Checking firmware version..."));
-  wifi.println(F("AT+GMR"));
-  if (wifi.readLine(buffer, sizeof(buffer))) {
-    debug.println(buffer);
-    wifi.find(F("OK.")); // Discard the 'OK' that follows
-  } else {
-    debug.println(F("error"));
-  }
+//  debug.print(F("Checking firmware version..."));
+//  wifi.println(F("AT+GMR"));
+//  if (wifi.readLine(buffer, sizeof(buffer))) {
+//    debug.println(buffer);
+//    wifi.find(F("OK.")); // Discard the 'OK' that follows
+//  } else {
+//    debug.println(F("error"));
+//  }
 
   debug.print(F("Connecting to WiFi..."));
   if (wifi.connectToAP(F(ESP_SSID), F(ESP_PASS))) {
@@ -90,7 +89,6 @@ void setup() {
 
 void loop() {
   unsigned long currentMillis = millis();
-
   if (currentMillis - previousMillis >= 120000L) {
     previousMillis = currentMillis;
     doRequest();
@@ -155,9 +153,7 @@ String prepareJson() {
 
 // Initating BMP sensor
 void barInit(void) {
-  //barometer = BMP180();
   if (barometer.EnsureConnected()) { // We check to see if we can connect to the sensor.
-
     debug.println(F("Connected to BMP180")); // Output we are connected to the computer.
     barometer.SoftReset(); // When we have connected, we reset the device to ensure a clean start.
     barometer.Initialize(); // Now we initialize the sensor and pull the calibration data.
@@ -172,13 +168,14 @@ float getHumidity(void) {
   float h = dht.readHumidity();
   if (isnan(h)) { // Check if any reads failed and exit early (to try again).
     debug.println(F("Failed to read from DHT sensor!"));
+    h = -99;
   } else {
     return h;
   }
 }
 
 // Temp from DS1820
-float getTemperature() {
+float getTemperature(void) {
   byte type_s;
   byte data[12];
   byte addr[8];
