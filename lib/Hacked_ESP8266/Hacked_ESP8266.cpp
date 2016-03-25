@@ -160,6 +160,7 @@ boolean Hacked_ESP8266::softReset(void) {
   uint32_t save  = receiveTimeout; // Temporarily override recveive timeout,
   receiveTimeout = resetTimeout;   // reset time is longer than normal I/O.
   println(F("AT+RST"));            // Issue soft-reset command
+  delay(100);
   if(find(bootMarker)) {           // Wait for boot message
     println(F("ATE0"));            // Turn off echo
     found = find();                // OK?
@@ -244,19 +245,19 @@ void Hacked_ESP8266::closeTCP(void) {
 // else false.  Calling function should then handle data returned, may
 // need to parse IPD delimiters (see notes in find() function.
 // (Can call find(F("Unlink"), true) to dump to debug.)
-// boolean Hacked_ESP8266::requestURL(Fstr *url) {
-//   print(F("AT+CIPSEND="));
-//   println(25 + strlen_P((Pchr *)url) + strlen_P((Pchr *)host));
-//   if(find(F("> "))) { // Wait for prompt
-//     print(F("GET ")); // 4
-//     print(url);
-//     print(F(" HTTP/1.1\r\nHost: ")); // 17
-//     print(host);
-//     print(F("\r\n\r\n")); // 4
-//     return(find()); // Gets 'SEND OK' line
-//   }
-//   return false;
-// }
+boolean Hacked_ESP8266::requestURL(Fstr *url) {
+  print(F("AT+CIPSEND="));
+  println(25 + strlen_P((Pchr *)url) + strlen_P((Pchr *)host));
+  if(find(F("> "))) { // Wait for prompt
+    print(F("GET ")); // 4
+    print(url);
+    print(F(" HTTP/1.1\r\nHost: ")); // 17
+    print(host);
+    print(F("\r\n\r\n")); // 4
+    return(find()); // Gets 'SEND OK' line
+  }
+  return false;
+}
 
 // Requests page from currently-open TCP connection.  URL is
 // character string in SRAM.  Returns true if request issued successfully,
@@ -279,17 +280,31 @@ void Hacked_ESP8266::closeTCP(void) {
 
 // boolean Hacked_ESP8266::postRequest(Fstr *url, char* json) {
 boolean Hacked_ESP8266::postRequest(Fstr *url, char* json) {
+  int len = 78 + strlen_P((Pchr *)url) + strlen(json) + strlen_P((Pchr *)host); // 58 / 92
     print(F("AT+CIPSEND="));
-    println(58 + strlen_P((Pchr *)url) + strlen(json) + strlen_P((Pchr *)host));
-    if(find(F("> "))) { // Wait for prompt
-        print(F("POST ")); // 4
+    println(len); // 58
+    if(find(F(">"))) { // Wait for prompt
+        print(F("POST ")); // 5
         print(url);
         print(F(" HTTP/1.1\r\nHost: ")); // 17
         print(host);
         print(F("\r\nContent-Type: application/json")); // 32
+        print(F("\r\nContent-Length: ")); // 18
+        print(strlen(json)); // 2
         print(F("\r\n\r\n")); // 4
         print(json);
         return(find()); // Gets 'SEND OK' line
     }
     return false;
 }
+
+// boolean Hacked_ESP8266::request(char* raw_data) {
+//   int len = strlen(raw_data); // 58 / 92
+//     print(F("AT+CIPSEND="));
+//     println(len); // 58
+//     if(find(F(">"))) { // Wait for prompt
+//         print(raw_data);
+//         return(find()); // Gets 'SEND OK' line
+//     }
+//     return false;
+// }

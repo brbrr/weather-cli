@@ -9,6 +9,8 @@
 #include <BMP180.h> //BMP
 #include <ArduinoJson.h>
 
+#include <Sleep_n0m1.h>
+
 
 void doRequest(Fstr *url, char* data);
 void initSensors(void);
@@ -16,6 +18,8 @@ float getHumidity(void);
 float getTemperature(void);
 void clearBuffer(void);
 char* createJson(char* buff, int len);
+void doResets(void);
+void connectAndSend(void);
 
 #define ARD_RX   10
 #define ARD_TX   11
@@ -24,18 +28,21 @@ char* createJson(char* buff, int len);
 #define ESP_SSID "Mystical Forcess" // Your network name here
 #define ESP_PASS "roomofmagic!" // Your network password here
 
-#define HOST     "192.168.0.50"     // Host to contact
 #define PAGE     "/reports" // Web page to request
-#define PORT     4567        // 80 = HTTP default port
+// #define HOST     "weather-api-brbrr.herokuapp.com"     // Host to contact
+// #define PORT     80        // 80 = HTTP default port
+#define HOST     "192.168.0.50"     // Host to contact
+#define PORT     3000        // 80 = HTTP default port
+
+// https://weather-api-brbrr.herokuapp.com/
 
 //#define esp Serial1 // If using Leonardo board
 #define debug Serial // Ideally switch to external (SS debug UART), as now debug output contains lots of trash
 
 SoftwareSerial esp(ARD_RX, ARD_TX); // Arduino RX = ESP TX, Arduino TX = ESP RX
 
-// Must declare output stream before Adafruit_ESP8266 constructor; can be
+// Must declare output stream before Hacked_ESP8266 constructor; can be
 // a Softwareserial stream, or debug/debug1/etc. for UART.
-// Must call begin() on the stream(s) before using Adafruit_ESP8266 object.
 Hacked_ESP8266 wifi(&esp, &debug, ESP_RST);
 
 // Sensor classes
@@ -47,7 +54,7 @@ OneWire oneWire(4); //DS1820 sensor on pin 4
 DallasTemperature sensors(&oneWire);
 DeviceAddress ds; // arrays to hold device address
 
-unsigned long previousMillis = 0;        // will store last time request was send
+Sleep sleep;
 
 void setup() {
         esp.begin(9600); // Soft debug connection to ESP8266
@@ -60,56 +67,42 @@ void setup() {
 
         wifi.setBootMarker(F("ready"));
         // wifi.setTimeouts(20000, 20000, 30000, 20000);
+        doResets();
+        connectAndSend();
 
-        // Test if module is ready
-        debug.print(F("Hard reset..."));
-        if (!wifi.hardReset()) {
-                debug.println(F("no response from module."));
-                for (;; );
-        }
-        debug.println(F("OK."));
+}
 
-        debug.print(F("Soft reset..."));
-        if (!wifi.softReset()) {
-                debug.println(F("no response from module."));
-                for (;; );
-        }
-        debug.println(F("OK."));
+void loop() {
+        delay(100);
+        unsigned long beforeMilis = millis();
+        doResets();
+        connectAndSend();
+        unsigned long sleepTime = 120000L - (millis() - beforeMilis);
+        debug.print(F("Going to sleep for: "));
+        debug.println(sleepTime);
+        delay(100); //delay to allow serial to fully print before sleep
+        sleep.pwrDownMode(); //set sleep mode
+        sleep.sleepDelay(sleepTime); //sleep for: sleepTime
+}
 
-        debug.print(F("Checking firmware version..."));
-        wifi.println(F("AT+GMR"));
+void connectAndSend() {
         char buffer[50];
-        if (wifi.readLine(buffer, sizeof(buffer))) {
-                debug.println(buffer);
-                wifi.find(F("OK.")); // Discard the 'OK' that follows
-        } else {
-                debug.println(F("error"));
-        }
+        char json[128];
 
-        debug.print(F("Connecting to WiFi..."));
+        debug.println(F("Connecting to WiFi..."));
         if (wifi.connectToAP(F(ESP_SSID), F(ESP_PASS))) {
-                debug.print(F("OK\nChecking IP addr..."));
+                debug.println(F("OK\nChecking IP addr..."));
                 wifi.println(F("AT+CIFSR"));
                 if (wifi.readLine(buffer, sizeof(buffer))) {
                         debug.println(buffer);
                         wifi.find(); // Discard the 'OK' that follows
-                        char b[200];
-                        doRequest(F(PAGE), createJson(b, 200));
+                        createJson(json, sizeof(json));
+                        debug.println(json);
+                        doRequest(F(PAGE), json);
                 } else debug.println(F("error")); // IP addr check failed
-                //wifi.closeAP();
+                wifi.closeAP();
         } else { // WiFi connection failed
                 debug.println(F("FAIL"));
-        }
-}
-
-void loop() {
-        char buff[128];
-        unsigned long currentMillis = millis();
-        if (currentMillis - previousMillis >= 120000L) {
-                previousMillis = currentMillis;
-                createJson(buff, 128);
-                debug.println(buff);
-                doRequest(F(PAGE), buff);
         }
 }
 
@@ -185,7 +178,36 @@ char* createJson(char* buff, int len) {
         JsonObject& root = jsonBuffer.createObject();
         root["temperature"] = getTemperature();
         root["humidity"] = getHumidity();
-        root["preasure"] = barometer.GetPressure();
+        root["pressure"] = barometer.GetPressure();
         root.printTo(buff, len);
         return(buff);
+}
+
+void doResets() {
+        debug.print(F("Hard reset..."));
+        if (!wifi.hardReset()) {
+                debug.println(F("no response from module."));
+                for (;; ) ;
+        }
+        debug.println(F("OK."));
+        delay(100);
+        debug.print(F("Soft reset..."));
+        if (!wifi.softReset()) {
+          debug.println(F("failed, one more try.."));
+          if (!wifi.softReset()) {
+                  debug.println(F("no response from module."));
+                  for (;; ) ;
+          }
+        }
+        debug.println(F("OK."));
+
+        debug.print(F("Checking firmware version..."));
+        wifi.println(F("AT+GMR"));
+        char buffer[50];
+        if (wifi.readLine(buffer, sizeof(buffer))) {
+                debug.println(buffer);
+                wifi.find(F("OK.")); // Discard the 'OK' that follows
+        } else {
+                debug.println(F("error"));
+        }
 }
