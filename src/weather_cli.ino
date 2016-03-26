@@ -20,6 +20,7 @@ void clearBuffer(void);
 char* createJson(char* buff, int len);
 void doResets(void);
 void connectAndSend(void);
+void goSleep(long time);
 
 #define ARD_RX   10
 #define ARD_TX   11
@@ -33,7 +34,6 @@ void connectAndSend(void);
 // #define PORT     80        // 80 = HTTP default port
 #define HOST     "192.168.0.50"     // Host to contact
 #define PORT     3000        // 80 = HTTP default port
-
 // https://weather-api-brbrr.herokuapp.com/
 
 //#define esp Serial1 // If using Leonardo board
@@ -67,9 +67,19 @@ void setup() {
 
         wifi.setBootMarker(F("ready"));
         // wifi.setTimeouts(20000, 20000, 30000, 20000);
-        doResets();
-        connectAndSend();
+        // // doResets();
+        //
+        // debug.print(F("Checking firmware version..."));
+        // wifi.println(F("AT+GMR"));
+        // char buffer[50];
+        // if (wifi.readLine(buffer, sizeof(buffer))) {
+        //         debug.println(buffer);
+        //         wifi.find(F("OK.")); // Discard the 'OK' that follows
+        // } else {
+        //         debug.println(F("error"));
+        // }
 
+        // connectAndSend();
 }
 
 void loop() {
@@ -77,12 +87,25 @@ void loop() {
         unsigned long beforeMilis = millis();
         doResets();
         connectAndSend();
-        unsigned long sleepTime = 120000L - (millis() - beforeMilis);
+        goSleep(beforeMilis);
+}
+
+void goSleep(long beforeMilis) {
+        long sleepTime = 120000L - (millis() - beforeMilis);
         debug.print(F("Going to sleep for: "));
         debug.println(sleepTime);
         delay(100); //delay to allow serial to fully print before sleep
+
+        wifi.println(String("AT+GSLP=") + String(sleepTime-100));
+        delay(100); //delay to allow serial to fully print before sleep
+        wifi.find(F("OK")); // Discard the 'OK' that follows
+
+
+        delay(100); //delay to allow serial to fully print before sleep
         sleep.pwrDownMode(); //set sleep mode
         sleep.sleepDelay(sleepTime); //sleep for: sleepTime
+        debug.println(F("After SleepD"));
+
 }
 
 void connectAndSend() {
@@ -187,27 +210,17 @@ void doResets() {
         debug.print(F("Hard reset..."));
         if (!wifi.hardReset()) {
                 debug.println(F("no response from module."));
-                for (;; ) ;
+                for (;; );
         }
         debug.println(F("OK."));
         delay(100);
         debug.print(F("Soft reset..."));
         if (!wifi.softReset()) {
-          debug.println(F("failed, one more try.."));
-          if (!wifi.softReset()) {
-                  debug.println(F("no response from module."));
-                  for (;; ) ;
-          }
+                debug.println(F("failed, one more try.."));
+                if (!wifi.softReset()) {
+                        debug.println(F("no response from module."));
+                        for (;; ) ;
+                }
         }
         debug.println(F("OK."));
-
-        debug.print(F("Checking firmware version..."));
-        wifi.println(F("AT+GMR"));
-        char buffer[50];
-        if (wifi.readLine(buffer, sizeof(buffer))) {
-                debug.println(buffer);
-                wifi.find(F("OK.")); // Discard the 'OK' that follows
-        } else {
-                debug.println(F("error"));
-        }
 }
